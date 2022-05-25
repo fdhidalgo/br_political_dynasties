@@ -18,4 +18,7 @@ The structure of the data is as follows:
 - `gender`: Gender of the parent, if available. 
 - `unnormalized_parent_name`: Parent name without normalization. 
 
+## Running the Code
+The data cleaning pipeline uses the [`targets`](https://docs.ropensci.org/targets/) package. To run the code run [run.R](run.R) in the root directory of the repository. 
 
+The text files of the legal documents are not in the github repository due to the size of the files. 
