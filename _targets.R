@@ -16,8 +16,6 @@ tar_option_set(
   # Set other options as needed.
 )
 
-# tar_make_clustermq() configuration (okay to leave alone):
-options(clustermq.scheduler = "multicore")
 
 # tar_make_future() configuration (okay to leave alone):
 future::plan(future.callr::callr)
