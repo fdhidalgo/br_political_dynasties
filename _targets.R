@@ -50,6 +50,10 @@ list(
     command = harmonize_names(extracted_names),
     format = "fst_dt"
   ),
+  tar_target(
+    name = exported_parents,
+    command = fwrite(harmonized_names, "./output/politician_parents.csv")
+  ),
   tar_render(
     name = descriptive_statistics,
     path = "./output/descriptive_statistics.Rmd"
