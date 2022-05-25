@@ -19,6 +19,6 @@ The structure of the data is as follows:
 - `unnormalized_parent_name`: Parent name without normalization. 
 
 ## Running the Code
-The data cleaning pipeline uses the [`targets`](https://docs.ropensci.org/targets/) package. The pipeline can be found in [_targets.R](_targets.R). To run the code run [run.R](run.R) in the root directory of the repository. 
+The data cleaning code is written in [`R`](https://www.r-project.org) and uses the [`targets`](https://docs.ropensci.org/targets/) package to manage the pipeline. `R` version  4.2.0 or greater is required. The pipeline can be found in [\_targets.R](\_targets.R). To run the code run [run.R](run.R) in the root directory of the repository.
 
 The text files extracted from the the legal documents are not in the github repository due to the size of the files. Contact me for access.
