@@ -1,0 +1,76 @@
+---
+title: "Descriptive Statistics"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(conflicted)
+library(targets)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r load_data}
+tar_load(harmonized_names)
+cand_data <- fread("./data/consulta_cand_2020_BRASIL.csv.gz", encoding = "Latin-1")
+```
+
+## Coverage of Parents Data
+
+Currently, we have extracted the parents data for mayoral candidates from the 2020 elections. The percentage of candidates with parents data can be found in the following table.
+
+```{r coverage_parents}
+
+```{r coverage}
+cand_data <- cand_data[DS_CARGO == "PREFEITO" &
+        DS_SITUACAO_CANDIDATO_PLEITO %in% c("DEFERIDO", "DEFERIDO COM RECURSO") &
+        DS_SIT_TOT_TURNO != "#NULO#"]
+
+cand_data[, found := fifelse(as.character(SQ_CANDIDATO) %in% harmonized_names$cand_id, TRUE, FALSE)]
+cand_data[, found_2 := fifelse(as.character(SQ_CANDIDATO) %in%
+        harmonized_names$cand_id[harmonized_names$n_parents >= 2], TRUE, FALSE)]
+prop_found_at_least1 <- cand_data[, .(pct_found = 100 * mean(found)), by = "DS_SIT_TOT_TURNO"]
+prop_found_at_least2 <- cand_data[, .(pct_found2 = 100 * mean(found_2)), by = "DS_SIT_TOT_TURNO"]
+
+prop_found <- merge(prop_found_at_least1, prop_found_at_least2)
+prop_found[
+        ,
+        DS_SIT_TOT_TURNO :=
+                fcase(
+                        DS_SIT_TOT_TURNO == "2º TURNO", "2nd Round",
+                        DS_SIT_TOT_TURNO == "ELEITO", "Elected",
+                        DS_SIT_TOT_TURNO == "NÃO ELEITO", "Not Elected"
+                )
+]
+names(prop_found) <- c("Candidate Status", "at least 1 parent", "2 parents")
+
+prop_found_uf <- cand_data[, .(pct_found = 100 * mean(found)), by = c("SG_UF")]
+prop_found_uf[, SG_UF := forcats::fct_reorder(SG_UF, pct_found)]
+
+prop_found2_uf <- cand_data[, .(pct_found = 100 * mean(found_2)), by = c("SG_UF")]
+prop_found2_uf <- prop_found2_uf[order(pct_found)]
+```
+
+
+```{r coverage_table}
+
+knitr::kable(prop_found,
+        digits = 1,
+        caption = "% of Candidates with Parents Data"
+)
+```
+
+The percentage of candidates with parents data by state can be found in the following plot.
+```{r coverage_plot}
+ggplot(prop_found_uf, aes(x = pct_found, y = SG_UF)) +
+        geom_point() +
+        xlab("% with at Least 1 Parent") +
+        ylab("State") +
+        cowplot::theme_cowplot() +
+        ggtitle("% of Candidates with Parents Data by State")
+```
+
+
+

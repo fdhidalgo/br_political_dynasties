@@ -5,7 +5,7 @@
 
 # Load packages required to define the pipeline:
 library(targets)
-# library(tarchetypes) # Load other packages as needed. # nolint
+library(tarchetypes)
 
 library(conflicted)
 
@@ -49,5 +49,9 @@ list(
     name = harmonized_names,
     command = harmonize_names(extracted_names),
     format = "fst_dt"
+  ),
+  tar_render(
+    name = descriptive_statistics,
+    path = "./output/descriptive_statistics.Rmd"
   )
 )
