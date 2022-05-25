@@ -29,6 +29,7 @@ import_txts <- function(txt_files, normalize = FALSE) {
 }
 
 tokenize_sentences <- function(txt_data) {
+     ## Use udpipe package to tokenize sentences
      txt_data[, doc_id := paste0(seq_along(txt_data$text))]
      udmodel <- udpipe::udpipe_load_model(file = "./data/portuguese-gsd-ud-2.5-191206.udpipe")
 
@@ -45,9 +46,8 @@ tokenize_sentences <- function(txt_data) {
      sentences
 }
 
-# name extraction code ----------------------------------------------------
-
 extract_filho_pattern <- function(sentences) {
+     ## This extracts names from sentences with the "filho de" pattern
      filho_sent <- sentences[sentence %ilike% "\\bfilh[oa] de\\b" |
           sentence %flike% "filho(a)"]
      filho_sent$extract <- sub(".*?(\\bfilh[oa] de\\b|filho\\(a\\) de)",
@@ -75,6 +75,7 @@ extract_filho_pattern <- function(sentences) {
 }
 
 extract_filiacao_pattern <- function(sentences) {
+     ## This extracts names from sentences with the "filiacao" pattern
      filiacao_removal_patterns <- c(
           "Endereço.*", "\\bos dados.*", "\\bdos documentos.*",
           "\\bconstantes.*", "\\bCertid[ãa]o.*", "\\bdata\\b.*",
@@ -116,6 +117,7 @@ extract_filiacao_pattern <- function(sentences) {
 }
 
 extract_nome_pattern <- function(sentences) {
+     ## This extracts names from sentences with the "nome de mai / nome de pai" pattern
      sentences[, nome_ind := grepl("\\bnome (\\bd[aeo] )?m[aã]e\\b|\\bnome (\\bd[aeo] )?pai\\b",
           sentence,
           ignore.case = TRUE
@@ -207,6 +209,7 @@ extract_nome_pattern <- function(sentences) {
 }
 
 extract_names <- function(sentences) {
+     ## This function extracts names from the 3 identified patterns
      filho_pattern_parents <- extract_filho_pattern(sentences)
      filiacao_pattern_parents <- extract_filiacao_pattern(sentences)
      nome_pattern_parents <- extract_nome_pattern(sentences)
@@ -218,6 +221,7 @@ extract_names <- function(sentences) {
 }
 
 cluster_names <- function(names, threshold) {
+     ## This function clusters names based on the similarity of the names
      if (length(names) > 1) {
           stringdists <- stringdist::stringdistmatrix(names, names, method = "jw", p = .1)
           colnames(stringdists) <- names
@@ -237,6 +241,8 @@ cluster_names <- function(names, threshold) {
 }
 
 harmonize_names <- function(extracted_names) {
+     ## This function normalizes and clusters names
+     ## It selects 2 names with most frequent mentions (keeping ties)
      extracted_names <- extracted_names[parent_name != ""]
      extracted_names[, unnormalized_parent_name := parent_name]
      extracted_names[, parent_name := str_squish(tolower(parent_name))]
