@@ -1,0 +1,13 @@
+.DS_Store
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.Rproj
+br_political_dynasties.Rproj
+
+_targets
+r/archive
+r/download_cand_documents
+r/scratch.r
+/data/txt
