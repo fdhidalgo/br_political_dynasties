@@ -4,7 +4,7 @@ This code extracts the names of parents of Brazilian politicians from official d
 
 The legal documents in PDF format associated with the candidacies were scraped from the TSE website: [https://divulgacandcontas.tse.jus.br](https://divulgacandcontas.tse.jus.br). After extracting the from the PDF files, we use regular expressions to extract the names of the parents of politicians.  In a minority of the cases,  the gender of the parents is also reported. 
 
-Most politicians are associated with 1 or 2 parents, but in some cases, the data report more than two parents. Politicians are associated with more than 2 parents when the extraction code produces more than 2 names and we cannot determine the correct names without manual inspection of the original documents. 
+Most politicians are associated with 1 or 2 parents, but in some cases, the data report more than two parents. Politicians are associated with more than 2 parents when the extraction code produces more than 2 names and we cannot determine the correct names without manual inspection of the original documents. This data has not been manually checked so some names will be incorrect or incomplete. 
 
 Some descriptive statistics can be found [here](./output/descriptive_statistics.md).
 
@@ -19,6 +19,6 @@ The structure of the data is as follows:
 - `unnormalized_parent_name`: Parent name without normalization. 
 
 ## Running the Code
-The data cleaning pipeline uses the [`targets`](https://docs.ropensci.org/targets/) package. To run the code run [run.R](run.R) in the root directory of the repository. 
+The data cleaning pipeline uses the [`targets`](https://docs.ropensci.org/targets/) package. The pipeline can be found in [_targets.R](_targets.R). To run the code run [run.R](run.R) in the root directory of the repository. 
 
-The text files of the legal documents are not in the github repository due to the size of the files. 
+The text files extracted from the the legal documents are not in the github repository due to the size of the files. Contact me for access.
