@@ -116,6 +116,7 @@ extract_filiacao_pattern <- function(sentences) {
      filiacao_extracted
 }
 
+
 extract_nome_pattern <- function(sentences) {
      ## This extracts names from sentences with the "nome de mai / nome de pai" pattern
      sentences[, nome_ind := grepl("\\bnome (\\bd[aeo] )?m[aã]e\\b|\\bnome (\\bd[aeo] )?pai\\b",
@@ -248,7 +249,7 @@ harmonize_names <- function(extracted_names) {
      extracted_names[, parent_name := str_squish(tolower(parent_name))]
      extracted_names[, parent_name := str_remove_all(parent_name, "[:punct:]|\\||[:digit:]")]
      extracted_names[, parent_name := stringi::stri_trans_general(parent_name, "latin-ascii")]
-     extracted_names[, parent_name := str_squish(str_remove_all(parent_name, "\\bde\\b|\\bda\\b|\\bdos\\b|\\bdas\\b"))]
+     extracted_names[, parent_name := str_squish(str_remove_all(parent_name, "\\bde\\b|\\bda\\b|\\bdos\\b|\\bdas\\b|\\bdo\\b"))]
 
      # save unnormalized names and collapse
      unnormalized_names <- unique(extracted_names[, .(cand_id, parent_name, unnormalized_parent_name)])
@@ -292,4 +293,180 @@ harmonize_names <- function(extracted_names) {
      extracted_names <- merge(extracted_names, unnormalized_names, all.x = TRUE, all.y = FALSE)
 
      extracted_names[, .(cand_id, tse_munid, parent_name, n_mentions, n_parents, gender, unnormalized_parent_name)]
+}
+
+clean_cand_data <- function(cand_data) {
+     cand_data <- cand_data[!is.na(id_candidato_bd)]
+     cand_data <- cand_data[!is.na(id_municipio)]
+     cand_data <- cand_data[!is.na(data_nascimento)]
+     cand_data[, cand_normalized_name := tolower(nome)]
+     cand_data[, cand_normalized_name := stringi::stri_trans_general(cand_normalized_name, "latin-ascii")]
+     cand_data[, cand_normalized_name := str_squish(str_remove_all(
+          cand_normalized_name,
+          "\\bde\\b|\\bda\\b|\\bdos\\b|\\bdas\\b|\\bdo\\b"
+     ))]
+     cand_data
+}
+
+calc_shared_words <- function(string, string_vec) {
+     ## this function calculates the normalized share of words shared between two strings
+     ## Note that this disregards word order
+     string <- string %>%
+          str_extract_all(pattern = "\\w+") %>%
+          unlist()
+     n_common_words <- purrr::map_int(
+          .x = str_extract_all(string_vec, pattern = "\\w+"),
+          .f = ~ length(intersect(string, .x))
+     )
+     max_words <- purrr::map_int(
+          .x = str_extract_all(string_vec, pattern = "\\w+"),
+          .f = ~ length(unique(c(string, .x)))
+     )
+     prop_common <- n_common_words / max_words
+     prop_common
+}
+
+get_string_sims_1cand <- function(parent_normalized_name, child_sequencial, cand_data) {
+     ## This function calculates various string similarity measures between parent's name and political candidates
+
+     # child_id_candidato_bd is the identifier for the child of the parent
+     # cand_data should usually be subsetted to a municipality (or state)
+     cand_names <- unique(cand_data[
+          ,
+          .(id_candidato_bd, sequencial, cand_normalized_name, cand_bdate = data_nascimento)
+     ])
+     cand_names$parent_normalized_name <- parent_normalized_name
+     cand_names$child_sequencial <- child_sequencial
+     cand_names$child_bdate <- cand_data[sequencial == bit64::as.integer64(child_sequencial) & ano == 2020, "data_nascimento"][[1]][1]
+     cand_names$child_id_candidato_bd <- cand_data[sequencial == bit64::as.integer64(child_sequencial) & ano == 2020, "id_candidato_bd"][[1]][1]
+     cand_names$bod_diff_years <- lubridate::interval(
+          lubridate::ymd(cand_names$cand_bdate),
+          lubridate::ymd(cand_names$child_bdate)
+     ) / lubridate::years(1)
+
+     ## Name string lengths
+     cand_names$parent_string_length <- nchar(parent_normalized_name)
+     cand_names$child_string_length <- nchar(cand_names$cand_normalized_name)
+
+     ## Estimate gender
+     cand_names$parent_female_prob <- genderBR::get_gender(cand_names$parent_normalized_name,
+          prob = TRUE
+     )
+     cand_names$child_female_prob <- genderBR::get_gender(cand_names$cand_normalized_name,
+          prob = TRUE
+     )
+
+     ## Proportion of shared words across two strings
+     cand_names$prop_shared_words <- calc_shared_words(parent_normalized_name, cand_names$cand_normalized_name)
+
+     ## String similarity measures
+     cand_names$osa_sim <- stringdist::stringsim(parent_normalized_name,
+          cand_names$cand_normalized_name,
+          method = "osa"
+     )
+     cand_names$lv_sim <- stringdist::stringsim(parent_normalized_name,
+          cand_names$cand_normalized_name,
+          method = "lv"
+     )
+     cand_names$dl_sim <- stringdist::stringsim(parent_normalized_name,
+          cand_names$cand_normalized_name,
+          method = "dl"
+     )
+     cand_names$lcs_sim <- stringdist::stringsim(parent_normalized_name,
+          cand_names$cand_normalized_name,
+          method = "lcs"
+     )
+     cand_names$qgram1_sim <- stringdist::stringsim(parent_normalized_name,
+          cand_names$cand_normalized_name,
+          method = "qgram", q = 1
+     )
+     cand_names$qgram2_sim <- stringdist::stringsim(parent_normalized_name,
+          cand_names$cand_normalized_name,
+          method = "qgram", q = 2
+     )
+     cand_names$jaro_sim <- stringdist::stringsim(parent_normalized_name,
+          cand_names$cand_normalized_name,
+          method = "jw", p = 0
+     )
+     cand_names$jw_sim <- stringdist::stringsim(parent_normalized_name,
+          cand_names$cand_normalized_name,
+          method = "jw", p = .2
+     )
+     cand_names <- cand_names[order(osa_sim)]
+     cand_names
+}
+
+get_string_sims <- function(parent_names, cand_data) {
+     furrr::future_map_dfr(
+          .x = seq_len(nrow(parent_names)),
+          .f = ~ get_string_sims_1cand(
+               parent_normalized_name = parent_names$parent_name[.x],
+               child_sequencial = parent_names$cand_id[.x],
+               cand_data = cand_data[id_municipio_tse == as.integer(parent_names$tse_munid[.x])]
+          ),
+          .options = furrr::furrr_options(packages = "data.table")
+     )
+}
+
+clean_training_data <- function(training_data, cand_parent_string_dists) {
+     setDT(training_data)
+
+     training_data$child_sequencial <- as.character(training_data$child_sequencial)
+     training_data$bod_diff_years <- NULL
+
+     training_data <- merge(training_data, cand_parent_string_dists,
+          by = c(
+               "id_candidato_bd", "sequencial", "cand_normalized_name",
+               "parent_normalized_name", "child_sequencial"
+          ),
+          all.x = TRUE,
+          all.y = FALSE
+     )
+     training_data
+}
+
+gen_cand_matches <- function(training_data, cand_parent_string_dists) {
+     ranger_recipe <-
+          recipe(formula = match ~ bod_diff_years + parent_string_length + child_string_length +
+               prop_shared_words + osa_sim + lv_sim + lcs_sim + qgram1_sim + qgram2_sim +
+               jaro_sim + jw_sim + parent_female_prob + child_female_prob, data = training_data) %>%
+          step_string2factor(one_of("match"), skip = TRUE) %>%
+          step_mutate(diff_gender_prob = parent_female_prob - child_female_prob) %>%
+          step_impute_mean(diff_gender_prob, bod_diff_years) %>%
+          step_rm(parent_female_prob, child_female_prob)
+
+     ranger_spec <-
+          rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+          set_mode("classification") %>%
+          set_engine("ranger")
+
+     ranger_workflow <-
+          workflow() %>%
+          add_recipe(ranger_recipe) %>%
+          add_model(ranger_spec)
+
+     cvfolds <- vfold_cv(training_data, v = 5)
+
+     set.seed(2803)
+     ranger_tune <-
+          tune_grid(ranger_workflow,
+               resamples = cvfolds, grid = 50,
+               metrics = metric_set(accuracy, precision, recall, spec)
+          )
+
+     best_rf <- select_best(ranger_tune, metric = "accuracy")
+     final_wf <- ranger_workflow %>%
+          finalize_workflow(best_rf)
+
+     fitted_model <- fit(final_wf, data = training_data)
+
+     preds <- predict(fitted_model, new_data = cand_parent_string_dists, type = "prob")
+     cand_parent_string_dists$match_prob <- preds$.pred_y
+
+     matches <- cand_parent_string_dists[
+          match_prob > .5 & is.na(child_id_candidato_bd) == FALSE,
+          .(parent_id_candidato_bd = id_candidato_bd, child_id_candidato_bd, match_prob)
+     ] |>
+          unique()
+     matches
 }

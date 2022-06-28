@@ -12,3 +12,5 @@ r/download_cand_documents
 r/scratch.r
 /data/txt
 *.html
+data/string_matching_training_data
+/data/cand_data.csv.gz
