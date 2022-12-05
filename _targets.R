@@ -1,7 +1,4 @@
 # Created by use_targets().
-# Follow the comments below to fill in this target script.
-# Then follow the manual to check and run the pipeline:
-#   https://books.ropensci.org/targets/walkthrough.html#inspect-the-pipeline # nolint
 
 # Load packages required to define the pipeline:
 library(targets)
@@ -12,23 +9,19 @@ library(conflicted)
 # Set target options:
 tar_option_set(
   packages = c("data.table", "stringr", "dplyr", "tidymodels"), # packages that your targets need to run
-  format = "rds" # default storage format
+  format = "rds" # default storage format,
   # Set other options as needed.
 )
 
 
-# tar_make_future() configuration (okay to leave alone):
 future::plan(future.callr::callr(workers = parallelly::availableCores() - 1))
 options("future.globals.maxSize" = 2000 * 1024^2)
 
-# Load the R scripts with your custom functions:
-# for (file in list.files("R", full.names = TRUE)) source(file)
 source("./r/data_cleaning.R")
 
 data.table::setDTthreads(parallel::detectCores() - 1)
 
 
-# Replace the target list below with your own:
 list(
   tar_target(
     name = txt_files,
@@ -39,7 +32,7 @@ list(
     format = "file"
   ),
   tar_target(
-    name = sentences,
+   name = sentences,
     command = tokenize_sentences(import_txts(txt_files)),
     format = "fst_dt"
   ),
@@ -60,6 +53,31 @@ list(
   tar_target(
     name = cand_data,
     command = clean_cand_data(fread(cand_data_file)),
+    format = "fst_dt"
+  ),
+  tar_target(name = vp_codes,
+             command = gen_vp_codes(cand_data, elec_results)
+             ),
+
+  tar_target(
+    name = cand_data20_file,
+    command = "./data/consulta_cand_2020_BRASIL.csv.gz",
+    format = "file"
+  ),
+  tar_target(
+    name = cand_data20,
+    command = fread(cand_data20_file,
+                    encoding = "Latin-1", keepLeadingZeros = TRUE),
+    format = "fst_dt"
+  ),
+  tar_target(
+    name = elec_results_file,
+    command = "./data/electoral_results.csv.gz",
+    format = "file"
+  ),
+  tar_target(
+    name = elec_results,
+    command = fread(elec_results_file),
     format = "fst_dt"
   ),
   tar_target(
@@ -91,11 +109,25 @@ list(
     command = gen_cand_matches(training_data, cand_parent_string_dists)
   ),
   tar_target(
-    name = exported_parents,
-    command = fwrite(harmonized_parent_names, "./output/politician_parents.csv")
+    name = parents_data,
+    command = add_identifiers(harmonized_parent_names = harmonized_parent_names,
+                              cand_data20 = cand_data20,
+                              cand_data = cand_data)
   ),
-  tar_render(
-    name = descriptive_statistics,
-    path = "./output/descriptive_statistics.Rmd"
+
+  tar_target(name = nonmissing_states,
+             command = gen_nonmissing_states(cand_data, parents_data,
+                                             prop_missing = .15)),
+
+  tar_target(name = cand_subset,
+             command = gen_cand_subset(cand_data = cand_data,
+                                       nonmissing_states = nonmissing_states,
+                                       name_matches = name_matches,
+                                       elec_results = elec_results,
+                                       vp_codes = vp_codes
+                                       )),
+  tar_target(
+    name = exported_parents,
+    command = fwrite(parents_data, "./output/politician_parents.csv")
   )
 )

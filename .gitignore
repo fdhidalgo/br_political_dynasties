@@ -11,6 +11,10 @@ r/archive
 r/download_cand_documents
 r/scratch.r
 /data/txt
+/data/secao_results*
 *.html
 data/string_matching_training_data
+data/locais_votacao
 /data/cand_data.csv.gz
+/data/electoral_results.csv.gz
+dynasties_analysis_files/

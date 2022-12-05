@@ -426,6 +426,8 @@ clean_training_data <- function(training_data, cand_parent_string_dists) {
 }
 
 gen_cand_matches <- function(training_data, cand_parent_string_dists) {
+
+  ##Set up machine learning model
      ranger_recipe <-
           recipe(formula = match ~ bod_diff_years + parent_string_length + child_string_length +
                prop_shared_words + osa_sim + lv_sim + lcs_sim + qgram1_sim + qgram2_sim +
@@ -435,6 +437,7 @@ gen_cand_matches <- function(training_data, cand_parent_string_dists) {
           step_impute_mean(diff_gender_prob, bod_diff_years) %>%
           step_rm(parent_female_prob, child_female_prob)
 
+     ## Tune random forest hyper-parameters
      ranger_spec <-
           rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
           set_mode("classification") %>%
@@ -445,6 +448,7 @@ gen_cand_matches <- function(training_data, cand_parent_string_dists) {
           add_recipe(ranger_recipe) %>%
           add_model(ranger_spec)
 
+     ## Five-fold cross-validation
      cvfolds <- vfold_cv(training_data, v = 5)
 
      set.seed(2803)
@@ -454,6 +458,7 @@ gen_cand_matches <- function(training_data, cand_parent_string_dists) {
                metrics = metric_set(accuracy, precision, recall, spec)
           )
 
+     ##Select model based on accuracy
      best_rf <- select_best(ranger_tune, metric = "accuracy")
      final_wf <- ranger_workflow %>%
           finalize_workflow(best_rf)
@@ -463,10 +468,117 @@ gen_cand_matches <- function(training_data, cand_parent_string_dists) {
      preds <- predict(fitted_model, new_data = cand_parent_string_dists, type = "prob")
      cand_parent_string_dists$match_prob <- preds$.pred_y
 
+     ##Choose matches that have a probability of a match greater than .5
      matches <- cand_parent_string_dists[
           match_prob > .5 & is.na(child_id_candidato_bd) == FALSE,
           .(parent_id_candidato_bd = id_candidato_bd, child_id_candidato_bd, match_prob)
      ] |>
           unique()
      matches
+}
+
+add_identifiers <- function(harmonized_parent_names, cand_data20, cand_data) {
+  ##sequencial data seems to be wrong in base dos dados data, so using TSE data to obtain CPF
+  ##then use CPF to merge in base dos dados identifier
+  harmonized_cpf <- merge(harmonized_parent_names,
+                                   cand_data20[, .(sequencial =
+                                                     as.character(SQ_CANDIDATO), cpf = NR_CPF_CANDIDATO)],
+                                   by.x = "cand_id", by.y = "sequencial",
+                                   all.x = TRUE, all.y = FALSE)
+
+  parents_data <- merge(harmonized_cpf,
+        cand_data[ano == 2020, .(cpf, id_candidato_bd)],
+        by.x = "cpf", by.y = "cpf", all.x = TRUE, all.y = FALSE)
+  setnames(parents_data, c("cpf", "id_candidato_bd"), c("cpf_child", "id_candidato_bd_child"))
+  parents_data
+}
+
+gen_nonmissing_states <- function(cand_data, parents_data, prop_missing) {
+  #number of parents found by candidate
+  parents_found <- merge(cand_data[ano == 2020 & cargo == "prefeito", .(id_candidato_bd, sigla_uf)],
+                         unique(parents_data[, .(id_candidato_bd_child, n_parents)]),
+                         by.x = "id_candidato_bd", by.y = "id_candidato_bd_child", all.x = TRUE, all.y = FALSE)
+  parents_found[is.na(n_parents), n_parents := 0]
+
+  ##missingness by state
+  prop_missing_by_state <- parents_found[, .(prop_missing = mean(n_parents == 0)), by = "sigla_uf"][order(prop_missing)]
+  nonmissing_states <- prop_missing_by_state$sigla_uf[prop_missing_by_state$prop_missing <= prop_missing]
+  nonmissing_states
+}
+
+gen_cand_subset <- function(cand_data, nonmissing_states, name_matches,
+                            elec_results, vp_codes) {
+  ##candidate data in non-missing states
+  cand_subset <- cand_data[ano == 2020 & sigla_uf %in% nonmissing_states & cargo == "prefeito"]
+  ##dynastic candidates are candidates with any parent who has run before
+  cand_subset$dynastic <- ifelse(cand_subset$id_candidato_bd %in% name_matches$child_id_candidato_bd,
+                                 TRUE, FALSE)
+  ##parent candidate data
+  parent_cand_data <- cand_data[id_candidato_bd %in% name_matches$parent_id_candidato_bd]
+  ##parent was a candidate for mayor or vice mayor
+  name_matches[, parent_mayor_cand := ifelse(parent_id_candidato_bd %in%
+                                               parent_cand_data$id_candidato_bd[parent_cand_data$cargo == "prefeito" |
+                                                                                  parent_cand_data$cargo == "vice-prefeito"],
+                                             TRUE, FALSE)]
+  ##Note that vice-prefeito is not in results data, so add coalition results for vice-prefeito
+  ##parent was a mayor or vice mayor
+  vp_results <- tibble(ano = vp_codes$ano, turno = 1,
+         tipo_eleicao = "eleicao ordinaria",
+         cargo = "vice-prefeito",
+         id_candidato_bd = vp_codes$vp_id_candidato_bd,
+         resultado = vp_codes$resultado,
+         votos = vp_codes$votos)
+  elec_results <- bind_rows(elec_results, vp_results)
+
+  name_matches[, parent_elected_mayor := ifelse(parent_id_candidato_bd %in%
+                                                  elec_results$id_candidato_bd[(elec_results$cargo == "prefeito" |
+                                                                                  elec_results$cargo == "vice-prefeito") &
+                                                                                 elec_results$resultado == "eleito"],
+                                                TRUE, FALSE)]
+  ##parent ran in 2016
+  name_matches[, parent_ran_mayor_2016 := ifelse(parent_id_candidato_bd %in%
+                                                   cand_data$id_candidato_bd[cand_data$ano == 2016 & cand_data$cargo %in% c("prefeito", "vice-prefeito")],
+                                                 TRUE, FALSE)]
+  #create dynastic mayor dummy
+  cand_subset$dynastic_mayor <- ifelse(cand_subset$id_candidato_bd %in%
+                                         name_matches$child_id_candidato_bd[name_matches$parent_mayor_cand == TRUE],
+                                       TRUE, FALSE)
+  ##create dynastic mayor and elected dummy
+  cand_subset$dynastic_elected_mayor <- ifelse(cand_subset$id_candidato_bd %in%
+                                                 name_matches$child_id_candidato_bd[name_matches$parent_elected_mayor == TRUE],
+                                               TRUE, FALSE)
+  cand_subset$dynastic_mayor16 <- ifelse(cand_subset$id_candidato_bd %in%
+                                           name_matches$child_id_candidato_bd[name_matches$parent_ran_mayor_2016 == TRUE],
+                                         TRUE, FALSE)
+
+  ##create results data
+  vote_totals20 <- elec_results[ano == 2020 & turno == 1 & tipo_eleicao == "eleicao ordinaria" & cargo == "prefeito",
+                                .(total_votes = sum(votos)),
+                                by = c("id_municipio_tse")]
+  elec_prefeito_results20 <- merge(elec_results[ano == 2020 & turno == 1 & tipo_eleicao == "eleicao ordinaria" &
+                                                  cargo == "prefeito",
+                                                .(id_candidato_bd,  id_municipio_tse, resultado, votos)],
+                                   vote_totals20, all.x = TRUE, all.y = FALSE)
+
+  cand_subset <- merge(cand_subset, elec_prefeito_results20,
+                       all.x = TRUE, all.y = FALSE)
+  cand_subset[, elected := ifelse(resultado != "nao eleito", 1, 0)]
+  cand_subset[ , vote_pct := 100 * votos / total_votes]
+  cand_subset
+}
+
+gen_vp_codes <- function(cand_data, elec_results) {
+  pref_cands <- elec_results[cargo == "prefeito" & !is.na(id_candidato_bd),
+                             .(ano, id_municipio_tse, pref_id_candidato_bd = id_candidato_bd,
+                               numero = numero_candidato)]
+  vp_cands <- cand_data[cargo == "vice-prefeito",
+                        .(ano, id_municipio_tse, vp_id_candidato_bd = id_candidato_bd, numero)]
+  vp_cands <- merge(vp_cands, pref_cands, all.x = FALSE, all.y = FALSE)
+  vp_cands[, numero := NULL]
+  vp_cands <- merge(vp_cands, elec_results[, c("ano", "id_municipio_tse", "id_candidato_bd",
+                                               "resultado", "votos")],
+                    by.x = c("ano", "id_municipio_tse", "pref_id_candidato_bd"),
+                    by.y = c("ano", "id_municipio_tse", "id_candidato_bd"),
+                    all.x = TRUE, all.y = FALSE)
+  vp_cands
 }

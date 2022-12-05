@@ -1,0 +1,91 @@
+---
+title: "Dynasties Analysis"
+format: html
+editor: visual
+---
+
+```{r}
+#| echo: false
+#| message: false
+library(data.table)
+library(tidyverse)
+library(targets)
+library(gt)
+library(fixest)
+
+##TODO: investigate missing values 964
+```
+
+## Prevalence of Dynastic Families
+
+```{r}
+#| echo: false
+tar_load(cand_subset)
+tar_load(nonmissing_states)
+all_cands_dynastic <- summarise(cand_subset,
+                                cand_parents = 100 * mean(dynastic, na.rm = TRUE),
+                                cand_mayor_parents = 100 * mean(dynastic_mayor, na.rm = TRUE),
+                                cand_elected_mayor_parents = 100 * mean(dynastic_elected_mayor, na.rm = TRUE)) |> 
+  mutate(Sample = "All Mayoral Candidates")
+
+elected_cands_dynastic <- filter(cand_subset, resultado %in% c( "eleito")) |>
+                             summarise(
+                                cand_parents = 100 * mean(dynastic, na.rm = TRUE),
+                                cand_mayor_parents = 100 * mean(dynastic_mayor, na.rm = TRUE),
+                                cand_elected_mayor_parents = 100 * mean(dynastic_elected_mayor, na.rm = TRUE)) |>
+  mutate(Sample = "Elected Mayoral Candidates")
+  
+
+small_cands_dynastic <- filter(cand_subset, total_votes <= quantile(total_votes, .25, na.rm = TRUE)) |>
+                             summarise(
+                                cand_parents = 100 * mean(dynastic, na.rm = TRUE),
+                                cand_mayor_parents = 100 * mean(dynastic_mayor, na.rm = TRUE),
+                                cand_elected_mayor_parents = 100 * mean(dynastic_elected_mayor, na.rm = TRUE)) |>
+  mutate(Sample = "Mayoral Candidates in Small Municipalities")
+
+nordeste_cands_dynastic <- filter(cand_subset, 
+                                  sigla_uf %in% c("AL", "BA", "CE", "MA", 
+                                                  "PB", "PE", "PI", "RN", "SE")) |> 
+   summarise(cand_parents = 100 * mean(dynastic, na.rm = TRUE),
+                                cand_mayor_parents = 100 * mean(dynastic_mayor, na.rm = TRUE),
+                                cand_elected_mayor_parents = 100 * mean(dynastic_elected_mayor, na.rm = TRUE)) |> 
+  mutate(Sample = "Mayoral Candidates in Northeastern States")
+
+bind_rows(all_cands_dynastic, small_cands_dynastic,
+          elected_cands_dynastic, 
+          nordeste_cands_dynastic) |> 
+  relocate(Sample) |>
+  gt() |>
+  cols_label(cand_parents = "Candidate (any office)",
+             cand_mayor_parents = "Mayoral Candidate",
+             cand_elected_mayor_parents = "Elected Mayor") |>
+  fmt_percent(columns = starts_with("cand"),
+              scale_values = FALSE, decimals = 1) |>
+  tab_spanner(label = "% Candidates with a Parent who was a",
+              columns = starts_with("cand")) |>
+  tab_header(title = "Prevalence of Dynastic Candidates in 2020 Mayoral Elections") |>
+  tab_source_note(source_note = paste0("Data shown for ", length(nonmissing_states),
+                                       " states with available administrative data.")) |> 
+  tab_footnote(footnote = "Municipalities with electorates below the first quartile.",
+               locations = cells_body(columns = "Sample",
+                                      rows = 2))
+
+```
+
+## The Dynastic Advantage
+
+```{r}
+
+dyn_adv_mods <- list(
+    `1` = feols(vote_pct ~ dynastic | id_municipio_tse, data = cand_subset),
+  `2` = feols(vote_pct ~ dynastic_mayor | id_municipio_tse, data = cand_subset),
+  `3` = feols(vote_pct ~ dynastic_elected_mayor | id_municipio_tse, data = cand_subset),
+  `4` = feols(elected ~ dynastic | id_municipio_tse, data = cand_subset),
+  `5` = feols(elected ~ dynastic_mayor | id_municipio_tse, data = cand_subset),
+  `6` = feols(elected ~ dynastic_elected_mayor | id_municipio_tse, data = cand_subset)
+  )
+
+modelsummary::modelsummary(dyn_adv_mods,
+                           gof_omit = "AIC|RMSE|BIC",
+                           output = "kableExtra")
+```
