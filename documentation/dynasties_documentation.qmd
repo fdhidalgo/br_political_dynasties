@@ -1,0 +1,164 @@
+---
+title: "Methodology"
+author: "F. Daniel Hidalgo"
+format: gfm
+bibliography: references.bib
+editor: visual
+execute: 
+  cache: true
+---
+
+```{r}
+#| label: setup
+#| echo: false
+#| warning: false
+#| message: false
+#| cache: false
+
+library(targets)
+library(data.table)
+library(ggplot2)
+
+if ("_targets" %in% dir() == FALSE) {
+        tar_config_set(store = "../_targets/")
+}
+
+theme_set(cowplot::theme_cowplot())
+
+```
+
+```{r}
+#| label: load_data
+#| echo: false
+tar_load(c(
+        cand_data, parents_data,
+        elec_results, tuned_name_matching_model,
+        training_data
+))
+```
+
+## Original Documents
+
+We download all candidate documents from the Supreme Electoral Tribunal's electoral candidacy [site](https://divulgacandcontas.tse.jus.br/divulga/#/). Almost all documents are in PDF format, but we convert a small number of documents in other image formats to PDF. Most PDF documents have embedded text, but a significant proportion do not. For PDFs without embedded text, we use the Tesseract OCR [engine](https://github.com/tesseract-ocr/tesseract) via the `tesseract` R package [@tesseract] to retrieve the text.
+
+## Text Processing
+
+Through manual inspection we identified common patterns used in the candidacy legal documents to report parent names. Specifically, the three common patterns we identified were:
+
+-   "filho de" or "filha de"
+-   "filiação de"
+-   "nome da mãe" or "nome do pai"
+
+We use regular expressions to extract the names from the text following those phrases. Once we have extracted all potential parent names from the documents associated with each candidate, we use a clustering algorithm to combine very similar names. This clustering procedure helps account for minor spelling or typographical errors.
+
+For a small number of candidates, the above procedures results in more than 2 unique names. We tabulate the number of times each name is mentioned and keep the 2 most frequently mentioned names. If there are ties among the 2 most frequently mentioned names, then we keep all the ties. As a result of this, a small number of candidates have more than 2 parents.
+
+When the gender of the parent is clear in the documents due to being explicitly labelled as the mother or father, we also record gender.
+
+### Missing Data
+
+```{r}
+#| label: missing_data
+#| echo: false
+elected <- elec_results[resultado %in% c("eleito", "eleito por media", "eleito por qp") &
+        !is.na(id_candidato_bd) & ano == 2020]
+target_pop <- rbindlist(list(
+        cand_data[ano == 2020 & cargo == "prefeito" & situacao == "deferido"],
+        cand_data[ano == 2020 & cargo == "vereador" & situacao == "deferido" & id_candidato_bd %in% elected$id_candidato_bd]
+))
+parents_found <- merge(target_pop,
+        unique(parents_data[, .(id_candidato_bd_child, n_parents)]),
+        by.x = "id_candidato_bd", by.y = "id_candidato_bd_child", all.x = TRUE, all.y = FALSE
+)
+parents_found[is.na(n_parents), n_parents := 0]
+
+total_unique_cands <- length(unique(cand_data$id_candidato_bd))
+
+```
+
+```{r}
+#| label: tbl-missing-data
+#| echo: false
+#| tbl-cap: Percentage of candidates with parent data by office.
+
+
+## Use GT package to create table
+library(gt)
+
+
+parents_found_table <- parents_found[, .(
+        n = .N,
+        parents0 = mean(n_parents == 0),
+        parents1 = mean(n_parents == 1),
+        parents2 = mean(n_parents == 2),
+        parents3 = mean(n_parents > 2)
+), by = "cargo"]
+parents_found_table$cargo <- ifelse(parents_found_table$cargo == "prefeito",
+        "Mayor", "Councilor"
+)
+
+gt(parents_found_table) |>
+        cols_label(
+                cargo = "Office",
+                n = "N",
+                parents0 = "No Parents",
+                parents1 = "1 Parent",
+                parents2 = "2 Parents",
+                parents3 = "> 2 Parents"
+        ) |>
+        fmt_percent(
+                columns = starts_with("parents"),
+                decimals = 0
+        ) |>
+        fmt_integer(
+                columns = c(n)
+        )
+
+```
+
+The candidate documents do not always include parent names. In @tbl-missing-data, we show the percentage of candidates with the number of parents found by office. Overall, we found at least 1 parent for `r round(mean(parents_found$n_parents > 0) * 100, 1)`% of candidates and at least 2 parents for `r round(mean(parents_found$n_parents > 1) * 100, 1)`% of candidates.
+
+```{r}
+#| label: fig-missing-data-state
+#| echo: false
+#| fig-cap: Percentage of candidates with no parent data by state. 
+prop_missing_by_state <- parents_found[, .(prop_missing = mean(n_parents == 0)), by = "sigla_uf"][order(prop_missing)]
+prop_missing_by_state$sigla_uf <- reorder(
+        prop_missing_by_state$sigla_uf,
+        prop_missing_by_state$prop_missing
+)
+
+ggplot(prop_missing_by_state, aes(x = prop_missing, y = sigla_uf)) +
+        geom_point() +
+        xlab("Proportion of Candidates with No Parents Data") +
+        ylab("State")
+```
+
+There is considerable variation in the availability of data by state. In @fig-missing-data-state, we show the proportion of candidates with no parent data by state.
+
+## Merging Parents with Candidate Data
+
+To identify parents with previous political experience, we merge the parent names with candidate data provided by the TSE and harmonized by the organization "[Base dos Dados](https://basedosdados.org)". This data encompasses all candidates to local office since the 2000 elections for a total of `r format(total_unique_cands, big.mark = ",")` candidates.
+
+To match parent names with candidate data, we first condition on the municipality and then use supervised learning method proposed by @kaufman_klevs_2022. This method uses a combination of string distance metrics and machine learning to match names. We compute a variety of string distance metrics between the parent names and potential matches[^1] and other features of the names, such as string length. In addition, we compute the difference in ages between child of the parent, i.e. the 2020 election candidate, and the potential match from prior elections. The difference in ages is useful because child and parents with very similar or very different ages are unlikely to be a match. Finally, we also use the @genderbr package to compute the difference in the probability of each name being a a female name.
+
+[^1]: We use the following string distance metrics using the `stringdist` R package [@RJ-2014-011]: the proportion of shared words, Restricted Damerau-Levenshtein distance, Levenshtein distance, Longest Common Substring distance, Q-gram distance, Jaro similarity, and Jaro-Winkler similarity.
+
+To provide the needed to train the model, we assess a sample of potential matches to determine whether they are a match or not. Random sampling would be inefficient because the vast majority of potential matches are not matches. Instead, we use an adaptive approach where we initially sample potential matches that are more likely to be a match. We then use the results of the initial sample to train a model. Afer this initial training, we use the model to select additional training samples, which are then manually assessed[^2]. We repeat this process until our false positive error, as estimated using cross-validation, is acceptably low. The final size of the training set is `r nrow(training_data)` observations.
+
+[^2]: The specifics of the algorithm are in @kaufman_klevs_2022. Briefly, we apply the trained model to the unlabelled potential matches and select an additional sample of potential matches. We select the potential matches with predicted probabilities closest to 0.5, i.e. the potential matches which the model is most uncertain about. We then manually assess the potential matches, combine the new data with the already-labelled data, and use the results to train a new model.
+
+```{r}
+#| label: model_performance
+#| echo: false
+
+best_mod <- tune::select_best(tuned_name_matching_model$tune_out, metric = "accuracy")
+mod_metrics <- tune::collect_metrics(tuned_name_matching_model$tune_out)
+best_mod_metrics <- mod_metrics[mod_metrics$.config == best_mod$.config, ]
+```
+
+To estimate predicted probabilities of a match, we use a random forest model[^3] to predict matches as a function of string distance, string characteristics, and age differences. Our cross validated accuracy rate is `r round(best_mod_metrics$mean[best_mod_metrics$.metric == "accuracy"], 2)`, while precision and recall are `r round(best_mod_metrics$mean[best_mod_metrics$.metric == "precision"], 2)` and `r round(best_mod_metrics$mean[best_mod_metrics$.metric == "recall"], 2)`, respectively.
+
+[^3]: We use the `tidymodels` [@tidymodels] framework to train the model and use the `ranger` [@JSSv077i01] package implementation of random forests. The `mtry` and `min_n` hyperparaters are tuned via cross-validation. The number of trees is set to 1000.
+
+## References

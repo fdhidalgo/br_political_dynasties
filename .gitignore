@@ -5,6 +5,7 @@
 .Ruserdata
 .Rproj
 br_political_dynasties.Rproj
+*_cache
 
 _targets
 r/archive
@@ -18,3 +19,4 @@ data/locais_votacao
 /data/cand_data.csv.gz
 /data/electoral_results.csv.gz
 dynasties_analysis_files/
+data/cand_document_links.RData
